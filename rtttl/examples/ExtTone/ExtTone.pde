@@ -4,18 +4,41 @@
 const int pinSpeaker = 13;
 const int octave = 0;
 
-const char song_P[] PROGMEM =
-		"Indiana:d=4,o=5,b=250:e,8p,8f,8g,8p,1c6,8p.,d,8p,8e,1f,p.,g,8p,8a,8b,8p,1f6,p,a,8p,8b,2c6,2d6,2e6,e,8p,8f,8g,8p,1c6,p,d6,8p,8e6,1f.6,g,8p,8g,e.6,8p,d6,8p,8g,e.6,8p,d6,8p,8g,f.6,8p,e6,8p,8d6,2c6";
+const char song_P[] PROGMEM = "Ghostbusters:d=4,o=5,b=180:4c5,4c5,8e5,8f5,8g5,8p, 4a#5,4a#5,4f5,4f5,4c5,4c5,8e5,8f5,8g5,8p,4a#5,4a#5,4f5";
+
+
+unsigned long printTimestamp = -1;
+unsigned long printPeriod = 500;
 
 Rtttl player;
 
 void setup(void)
 {
-	player.begin(pinSpeaker);
-	player.play_P(song_P, octave);
+  Serial.begin(115200);
+  player.begin(pinSpeaker);
+  player.load(song_P, 0, true);
 }
 
 void loop(void)
 {
+  while(player.tick(0, true)){
+    
+    delay(1);
+    
+    //debugging
+    if(millis() - printTimestamp > printPeriod){
+      Serial.println("Song is continuing");  
+      printTimestamp = millis();
+    } 
+    
+  }
+  
+  //debugging
+  while(true){
+    if(millis() - printTimestamp > printPeriod){
+      Serial.println("Song has finished");
+      printTimestamp = millis();
+    } 
+  }
+  
 }
-

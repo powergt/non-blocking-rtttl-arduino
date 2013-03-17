@@ -108,6 +108,22 @@ const prog_uint16_t notes[] PROGMEM =
 class Rtttl
 {
 	uint8_t _pinSpk;
+	
+	//CH introduce necessary variables for non-blocking operation
+	unsigned long transitionStarted;
+	const char* transitionPointer;
+	const char* song;
+
+	//CH promote some variables from local _play(...) scope
+	//so that load(...) can store them  
+	byte default_dur;
+	byte default_oct;
+	int bpm;
+	int num;
+	long wholenote;
+	long duration;
+
+	
 #ifdef _Tone_h
 	Tone m_tone;
 #endif
@@ -115,6 +131,10 @@ class Rtttl
 public:
 	Rtttl()
 	{
+		default_dur = 4;
+		default_oct = 6;
+		bpm = 63;
+		transitionStarted = -1;
 		//		this->begin(tonePin);
 	}
 
@@ -165,16 +185,200 @@ public:
 		_play(p, octave_offset, false);
 	}
 
+
+	void load(const char *p, uint8_t octave_offset = 0, boolean pgm = false)
+	{
+
+		song = p;
+
+		// format: d=N,o=N,b=NNN:
+		// find the start (skip name, etc)
+
+		while (read_byte(p, pgm) != ':')
+			p++; // ignore name
+		p++; // skip ':'
+
+		// get default duration
+		if (read_byte(p, pgm) == 'd')
+		{
+			p++;
+			p++; // skip "d="
+			num = 0;
+			while (isdigit(read_byte(p, pgm)))
+			{
+				num = (num * 10) + (read_byte(p, pgm) - '0');
+				p++;
+			}
+			if (num > 0)
+				default_dur = num;
+			p++; // skip comma
+		}
+
+		// get default octave
+		if (read_byte(p, pgm) == 'o')
+		{
+			p++;
+			p++; // skip "o="
+			num = read_byte(p, pgm) - '0';
+			p++;
+			if (num >= 3 && num <= 7)
+				default_oct = num;
+			p++; // skip comma
+		}
+
+		// get BPM
+		if (read_byte(p, pgm) == 'b')
+		{
+			p++;
+			p++; // skip "b="
+			num = 0;
+			while (isdigit(read_byte(p, pgm)))
+			{
+				num = (num * 10) + (read_byte(p, pgm) - '0');
+				p++;
+			}
+			bpm = num;
+			p++; // skip colon
+		}
+
+		// BPM usually expresses the number of quarter notes per minute
+		wholenote = (60 * 1000L / bpm) * 4; // this is the time for whole note (in milliseconds)
+
+		transitionPointer = p;
+
+	}
+
+	boolean tick(uint8_t octave_offset, boolean pgm = false)
+	{
+		//see if a new transition needs to be processed
+		if(transitionStarted == -1 || (millis() - transitionStarted) > duration){
+			//remember when it started
+			transitionStarted = millis();
+			//process next transition, and check if it is the last
+			if(!nextTransition(octave_offset, pgm)){
+				reload(octave_offset);
+				return false;
+			}
+		}
+		return true;
+	}
+	
+	void reload(uint8_t octave_offset, boolean pgm = false){
+		load(song, octave_offset);
+		transitionStarted = -1;
+	}
+
+	boolean nextTransition(uint8_t octave_offset, boolean pgm = false)
+	{
+
+		byte note;
+		byte scale;
+		
+		const char * p = transitionPointer;
+
+		// read a single byte
+		if(!read_byte(p, pgm)){
+			_noTone();
+			return false;
+		}
+		
+		// first, get note duration, if available
+		num = 0;
+		while (isdigit(read_byte(p, pgm)))
+		{
+			num = (num * 10) + (read_byte(p, pgm) - '0');
+			p++;
+		}
+
+		if (num)
+			duration = wholenote / num;
+		else
+			duration = wholenote / default_dur; // we will need to check if we are a dotted note after
+
+		// now get the note
+		note = 0;
+
+		switch (read_byte(p, pgm))
+		{
+		case 'c':
+			note = 1;
+			break;
+		case 'd':
+			note = 3;
+			break;
+		case 'e':
+			note = 5;
+			break;
+		case 'f':
+			note = 6;
+			break;
+		case 'g':
+			note = 8;
+			break;
+		case 'a':
+			note = 10;
+			break;
+		case 'b':
+			note = 12;
+			break;
+		case 'p':
+		default:
+			note = 0;
+		}
+		p++;
+
+		// now, get optional '#' sharp
+		if (read_byte(p, pgm) == '#')
+		{
+			note++;
+			p++;
+		}
+
+		// now, get optional '.' dotted note
+		if (read_byte(p, pgm) == '.')
+		{
+			duration += duration / 2;
+			p++;
+		}
+
+		// now, get scale
+		if (isdigit(read_byte(p, pgm)))
+		{
+			scale = read_byte(p, pgm) - '0';
+			p++;
+		}
+		else
+		{
+			scale = default_oct;
+		}
+
+		scale += octave_offset;
+
+		if (read_byte(p, pgm) == ',')
+			p++; // skip comma for next note (or we may be at the end)
+
+		// now play the note
+
+		if (note)
+		{
+			_tone(read_word(&notes[(scale - 4) * 12 + note], pgm));
+		}
+		else
+		{
+			_noTone();
+		}
+
+		//store the place we have in the song
+		transitionPointer = p;
+		return true;
+
+	}
+
+
 	void _play(const prog_char *p, uint8_t octave_offset, bool pgm)
 	{
 		// Absolutely no error checking in here
 
-		byte default_dur = 4;
-		byte default_oct = 6;
-		int bpm = 63;
-		int num;
-		long wholenote;
-		long duration;
 		byte note;
 		byte scale;
 
@@ -308,7 +512,8 @@ public:
 
 			if (read_byte(p, pgm) == ',')
 				p++; // skip comma for next note (or we may be at the end)
-
+				
+				
 			// now play the note
 
 			if (note)
@@ -323,5 +528,6 @@ public:
 			}
 		}
 	}
+	
 };
 
