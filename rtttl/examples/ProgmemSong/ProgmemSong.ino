@@ -16,13 +16,11 @@ ProgmemSong player(13);
 void setup(void)
 {
   Serial.begin(115200);
-  Serial.println("setup()");
   player.setSong(song_P);
 }
 
 void loop(void)
 {
-  Serial.println("loop()");
   
   //play the tune
   while(player.tick()){
