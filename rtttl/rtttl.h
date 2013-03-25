@@ -94,20 +94,21 @@ const prog_uint16_t notes[] PROGMEM =
 class Song {
 
 	protected:
-		int songPosition;
 
-		uint8_t _pinSpk; //the pin to which the speaker is attached
+		uint8_t tonePin; //the pin to which the speaker is attached
 		
-		unsigned long transitionStarted; //when the last note or rest was started
-		unsigned long duration; //the length of the last note or rest
-		uint8_t octave_offset; //transpos by this number of octaves before playing notes
+		int nextPos; //the integer position of the next byte to read from the song stream 
 
-		byte default_dur; //the default duration of a note (if not specified)
-		byte default_oct; //the default octave (if not specified)
+		unsigned long periodStart; //when the last note or rest was started
+		unsigned long periodLength; //the length of the last note or rest
+
 		int bpm; //the beats per minute (speed) of the song
-		int num; //a temporary integer working space for various calculations 
-		unsigned long wholenote; //the duration of a whole note (e.g. how many of the smallest division exists in a whole note)
-	
+		unsigned long wholenote; //duration of a whole note in milliseconds 
+		byte defaultNoteDenominator; //default fraction of a wholenote (if not specified against a note)
+		
+		byte defaultOctave; //the default octave (if not specified against a note)
+		uint8_t transposeOctaves; //always transpose by this number of octaves before playing notes
+		
 #ifdef _Tone_h
 		Tone m_tone;
 #endif
@@ -115,26 +116,27 @@ class Song {
     public:
     
 		Song(uint8_t tonePin){
-			this->setTonePin(tonePin);
-			
-			songPosition = 0;
-			default_dur = 4;
-			default_oct = 6;
-			bpm = 63;
-
+			this->tonePin = tonePin;
+			this->nextPos = 0;
+			this->defaultNoteDenominator = 4;
+			this->defaultOctave = 6;
+			this->bpm = 63;
 		}
 						
 		bool initSong()
 		{
+			
+			int num; //a temporary integer working space for various calculations 
+
 			//Serial.println("initSong() started");			
 
 	#ifdef _Tone_h
-			this->m_tone.begin(_pinSpk);
+			this->m_tone.begin(tonePin);
 	#endif
 			
 			//prepare variables which will keep track of place in the song
-			transitionStarted = -1;
-			songPosition = 0;
+			periodStart = -1;
+			nextPos = 0;
 			
 			// format: d=N,o=N,b=NNN:
 			// find the start (skip name, etc)
@@ -158,7 +160,7 @@ class Song {
 					num = (num * 10) + (pop_byte() - '0');
 				}
 				if (num > 0)
-					default_dur = num;
+					defaultNoteDenominator = num;
 				pop_byte(); // skip comma
 			}
 
@@ -171,7 +173,7 @@ class Song {
 				pop_byte(); // skip "o="
 				num = pop_byte() - '0';
 				if (num >= 3 && num <= 7)
-					default_oct = num;
+					defaultOctave = num;
 				pop_byte(); // skip comma
 			}
 
@@ -203,9 +205,9 @@ class Song {
 		bool tick()
 		{
 			//see if a new transition needs to be processed
-			if(transitionStarted == -1 || (millis() - transitionStarted) > duration){
+			if(periodStart == -1 || (millis() - periodStart) > periodLength){
 				//remember when it started
-				transitionStarted = millis();
+				periodStart = millis();
 				//process next transition, and check if it is the last
 				if(!nextTransition()){
 					initSong();
@@ -213,11 +215,6 @@ class Song {
 				}
 			}
 			return true;
-		}
-
-		void setTonePin(uint8_t tonePin)
-		{
-			this->_pinSpk = tonePin;
 		}
 		
 	private:
@@ -235,17 +232,18 @@ class Song {
 #else
 		void _tone(uint16_t freq)
 		{
-			tone(this->_pinSpk, freq);
+			tone(this->tonePin, freq);
 		}
 
 		void _noTone()
 		{
-			noTone(this->_pinSpk);
+			noTone(this->tonePin);
 		}
 #endif
 		
 		bool nextTransition()
 		{
+			
 			//Serial.println("nextTransition() started");
 
 			byte note;
@@ -260,18 +258,18 @@ class Song {
 			//Serial.println("SONG CONTINUING");
 			
 			// first, get note duration, if available
-			num = 0;
+			int denominator = 0;
 			while (isdigit(peek_byte()))
 			{
-				num = (num * 10) + (pop_byte() - '0');
+				denominator = (denominator * 10) + (pop_byte() - '0');
 			}
 
 			//Serial.println("END DURATION");
 
-			if (num)
-				duration = wholenote / num;
+			if (denominator)
+				periodLength = wholenote / denominator;
 			else
-				duration = wholenote / default_dur; // we will need to check if we are a dotted note after
+				periodLength = wholenote / defaultNoteDenominator; // we will need to check if we are a dotted note after
 
 			// now get the note
 			note = 0;
@@ -319,7 +317,7 @@ class Song {
 			if (peek_byte() == '.')
 			{
 				pop_byte();
-				duration += duration / 2;
+				periodLength += periodLength / 2;
 			}
 
 			//Serial.println("END .");
@@ -331,10 +329,10 @@ class Song {
 			}
 			else
 			{
-				scale = default_oct;
+				scale = defaultOctave;
 			}
 
-			scale += octave_offset;
+			scale += transposeOctaves;
 
 			//Serial.println("END SCALE");
 
@@ -361,9 +359,9 @@ class Song {
 		}
 						
 		char peek_byte(){
-			return get_byte(songPosition);
+			return get_byte(nextPos);
 			/*
-			char read = get_byte(songPosition);
+			char read = get_byte(nextPos);
 			Serial.print("Peeked: '");
 			Serial.write(read);
 			Serial.println("'");
@@ -372,9 +370,9 @@ class Song {
 		}
 		
 		char pop_byte(){
-			get_byte(songPosition++);
+			get_byte(nextPos++);
 			/*
-			char read = get_byte(songPosition++);
+			char read = get_byte(nextPos++);
 			//Serial.print("Popped: '");
 			//Serial.write(read);
 			//Serial.println("'");
