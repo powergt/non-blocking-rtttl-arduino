@@ -1,3 +1,9 @@
+/** TODO:CH 
+ * Introduce skip logic which handles any whitespace insertion; cases skip("o=") ["o=", "o = "] or skip(",") [",", " , "]. 
+ * Introduce note detection which is case-insensitive
+ * Handle variations in sequence by permitting valid instructions in any sequence
+ * */
+
 #pragma once
 
 #if defined(ARDUINO) && ARDUINO >= 100
@@ -12,21 +18,9 @@
 
 #define isdigit(n) (n >= '0' && n <= '9')
 
-inline char read_byte(const char *p, bool pgm)
-{
-	if (pgm)
-		return pgm_read_byte(p);
-	else
-		return *p;
-}
-
-inline uint16_t read_word(const uint16_t *p, bool pgm)
-{
-	if (pgm)
-		return pgm_read_word(p);
-	else
-		return *p;
-}
+#ifndef NULL
+  #define NULL 0
+#endif
 
 const prog_uint16_t notes[] PROGMEM =
 {	0, //
@@ -97,354 +91,182 @@ const prog_uint16_t notes[] PROGMEM =
 	0
 };
 
-/*
- *
- * playing RTTTL music files in blocking mode
- * http://en.wikipedia.org/wiki/Ring_Tone_Transfer_Language
- *
- * based on Tone library demo
- *
- */
-class Rtttl
-{
-	uint8_t _pinSpk;
-	
-	//CH introduce necessary variables for non-blocking operation
-	unsigned long transitionStarted;
-	const char* transitionPointer;
-	const char* song;
+class Song {
 
-	//CH promote some variables from local _play(...) scope
-	//so that load(...) can store them  
-	byte default_dur;
-	byte default_oct;
-	int bpm;
-	int num;
-	long wholenote;
-	long duration;
+	protected:
+		int songPosition;
 
+		uint8_t _pinSpk; //the pin to which the speaker is attached
+		
+		unsigned long transitionStarted; //when the last note or rest was started
+		unsigned long duration; //the length of the last note or rest
+		uint8_t octave_offset; //transpos by this number of octaves before playing notes
+
+		byte default_dur; //the default duration of a note (if not specified)
+		byte default_oct; //the default octave (if not specified)
+		int bpm; //the beats per minute (speed) of the song
+		int num; //a temporary integer working space for various calculations 
+		unsigned long wholenote; //the duration of a whole note (e.g. how many of the smallest division exists in a whole note)
 	
 #ifdef _Tone_h
-	Tone m_tone;
+		Tone m_tone;
 #endif
+	
+    public:
+    
+		Song(uint8_t tonePin){
+			this->setTonePin(tonePin);
+			
+			songPosition = 0;
+			default_dur = 4;
+			default_oct = 6;
+			bpm = 63;
 
-public:
-	Rtttl()
-	{
-		default_dur = 4;
-		default_oct = 6;
-		bpm = 63;
-		transitionStarted = -1;
-		//		this->begin(tonePin);
-	}
+		}
+						
+		bool initSong()
+		{
+			//Serial.println("initSong() started");			
 
-	void begin(uint8_t tonePin)
-	{
-		this->_pinSpk = tonePin;
+	#ifdef _Tone_h
+			this->m_tone.begin(_pinSpk);
+	#endif
+			
+			//prepare variables which will keep track of place in the song
+			transitionStarted = -1;
+			songPosition = 0;
+			
+			// format: d=N,o=N,b=NNN:
+			// find the start (skip name, etc)
+
+			while (peek_byte() != ':'){
+				pop_byte(); //(ignore name characters)
+			}
+						
+			pop_byte(); // skip the ':' character
+
+			//Serial.println("END NAME");
+
+			// get default duration
+			if (peek_byte() == 'd')
+			{
+				pop_byte();
+				pop_byte(); // skip "d="
+				num = 0;
+				while (isdigit(peek_byte()))
+				{
+					num = (num * 10) + (pop_byte() - '0');
+				}
+				if (num > 0)
+					default_dur = num;
+				pop_byte(); // skip comma
+			}
+
+			//Serial.println("END DURATION");
+
+			// get default octave
+			if (peek_byte() == 'o')
+			{
+				pop_byte(); 
+				pop_byte(); // skip "o="
+				num = pop_byte() - '0';
+				if (num >= 3 && num <= 7)
+					default_oct = num;
+				pop_byte(); // skip comma
+			}
+
+			//Serial.println("END DEF OCT");
+
+			// get BPM
+			if (peek_byte() == 'b')
+			{
+				pop_byte();
+				pop_byte(); // skip "b="
+				num = 0;
+				while (isdigit(peek_byte()))
+				{
+					num = (num * 10) + (pop_byte() - '0');
+				}
+				bpm = num;
+				pop_byte(); // skip colon
+			}
+
+			//Serial.println("END BPM");
+
+			// BPM usually expresses the number of quarter notes per minute
+			wholenote = (60 * 1000L / bpm) * 4; // this is the time for whole note (in milliseconds)
+					
+			return true;
+
+		}
+		
+		bool tick()
+		{
+			//see if a new transition needs to be processed
+			if(transitionStarted == -1 || (millis() - transitionStarted) > duration){
+				//remember when it started
+				transitionStarted = millis();
+				//process next transition, and check if it is the last
+				if(!nextTransition()){
+					initSong();
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void setTonePin(uint8_t tonePin)
+		{
+			this->_pinSpk = tonePin;
+		}
+		
+	private:
+
 #ifdef _Tone_h
-		//		Serial.println("begin");
-		//		Serial.println(tonePin, DEC);
-		this->m_tone.begin(tonePin);
-		//		Serial.println("begin");
-#endif
+		void _tone(uint16_t freq)
+		{
+			this->m_tone.play(freq);
+		}
 
-	}
-
-#ifdef _Tone_h
-	void _tone(uint16_t freq)
-	{
-		//		Serial.println(freq);
-		this->m_tone.play(freq);
-	}
-
-	void _noTone()
-	{
-		//		Serial.println("1stop");
-		this->m_tone.stop();
-	}
+		void _noTone()
+		{
+			this->m_tone.stop();
+		}
 #else
-	void _tone(uint16_t freq)
-	{
-		//		Serial.println(freq);
-		tone(this->_pinSpk, freq);
-	}
+		void _tone(uint16_t freq)
+		{
+			tone(this->_pinSpk, freq);
+		}
 
-	void _noTone()
-	{
-		//		Serial.println("2stop");
-		noTone(this->_pinSpk);
-	}
+		void _noTone()
+		{
+			noTone(this->_pinSpk);
+		}
 #endif
-
-	void play_P(const prog_char *p, uint8_t octave_offset = 0)
-	{
-		_play(p, octave_offset, true);
-	}
-	void play(const char *p, uint8_t octave_offset = 0)
-	{
-		_play(p, octave_offset, false);
-	}
-
-
-	void load(const char *p, uint8_t octave_offset = 0, boolean pgm = false)
-	{
-
-		song = p;
-
-		// format: d=N,o=N,b=NNN:
-		// find the start (skip name, etc)
-
-		while (read_byte(p, pgm) != ':')
-			p++; // ignore name
-		p++; // skip ':'
-
-		// get default duration
-		if (read_byte(p, pgm) == 'd')
+		
+		bool nextTransition()
 		{
-			p++;
-			p++; // skip "d="
-			num = 0;
-			while (isdigit(read_byte(p, pgm)))
-			{
-				num = (num * 10) + (read_byte(p, pgm) - '0');
-				p++;
-			}
-			if (num > 0)
-				default_dur = num;
-			p++; // skip comma
-		}
+			//Serial.println("nextTransition() started");
 
-		// get default octave
-		if (read_byte(p, pgm) == 'o')
-		{
-			p++;
-			p++; // skip "o="
-			num = read_byte(p, pgm) - '0';
-			p++;
-			if (num >= 3 && num <= 7)
-				default_oct = num;
-			p++; // skip comma
-		}
-
-		// get BPM
-		if (read_byte(p, pgm) == 'b')
-		{
-			p++;
-			p++; // skip "b="
-			num = 0;
-			while (isdigit(read_byte(p, pgm)))
-			{
-				num = (num * 10) + (read_byte(p, pgm) - '0');
-				p++;
-			}
-			bpm = num;
-			p++; // skip colon
-		}
-
-		// BPM usually expresses the number of quarter notes per minute
-		wholenote = (60 * 1000L / bpm) * 4; // this is the time for whole note (in milliseconds)
-
-		transitionPointer = p;
-
-	}
-
-	boolean tick(uint8_t octave_offset, boolean pgm = false)
-	{
-		//see if a new transition needs to be processed
-		if(transitionStarted == -1 || (millis() - transitionStarted) > duration){
-			//remember when it started
-			transitionStarted = millis();
-			//process next transition, and check if it is the last
-			if(!nextTransition(octave_offset, pgm)){
-				reload(octave_offset);
+			byte note;
+			byte scale;
+			
+			// read a single byte - test for end of song
+			if(!peek_byte()){
+				_noTone();
 				return false;
 			}
-		}
-		return true;
-	}
-	
-	void reload(uint8_t octave_offset, boolean pgm = false){
-		load(song, octave_offset);
-		transitionStarted = -1;
-	}
 
-	boolean nextTransition(uint8_t octave_offset, boolean pgm = false)
-	{
-
-		byte note;
-		byte scale;
-		
-		const char * p = transitionPointer;
-
-		// read a single byte
-		if(!read_byte(p, pgm)){
-			_noTone();
-			return false;
-		}
-		
-		// first, get note duration, if available
-		num = 0;
-		while (isdigit(read_byte(p, pgm)))
-		{
-			num = (num * 10) + (read_byte(p, pgm) - '0');
-			p++;
-		}
-
-		if (num)
-			duration = wholenote / num;
-		else
-			duration = wholenote / default_dur; // we will need to check if we are a dotted note after
-
-		// now get the note
-		note = 0;
-
-		switch (read_byte(p, pgm))
-		{
-		case 'c':
-			note = 1;
-			break;
-		case 'd':
-			note = 3;
-			break;
-		case 'e':
-			note = 5;
-			break;
-		case 'f':
-			note = 6;
-			break;
-		case 'g':
-			note = 8;
-			break;
-		case 'a':
-			note = 10;
-			break;
-		case 'b':
-			note = 12;
-			break;
-		case 'p':
-		default:
-			note = 0;
-		}
-		p++;
-
-		// now, get optional '#' sharp
-		if (read_byte(p, pgm) == '#')
-		{
-			note++;
-			p++;
-		}
-
-		// now, get optional '.' dotted note
-		if (read_byte(p, pgm) == '.')
-		{
-			duration += duration / 2;
-			p++;
-		}
-
-		// now, get scale
-		if (isdigit(read_byte(p, pgm)))
-		{
-			scale = read_byte(p, pgm) - '0';
-			p++;
-		}
-		else
-		{
-			scale = default_oct;
-		}
-
-		scale += octave_offset;
-
-		if (read_byte(p, pgm) == ',')
-			p++; // skip comma for next note (or we may be at the end)
-
-		// now play the note
-
-		if (note)
-		{
-			_tone(read_word(&notes[(scale - 4) * 12 + note], pgm));
-		}
-		else
-		{
-			_noTone();
-		}
-
-		//store the place we have in the song
-		transitionPointer = p;
-		return true;
-
-	}
-
-
-	void _play(const prog_char *p, uint8_t octave_offset, bool pgm)
-	{
-		// Absolutely no error checking in here
-
-		byte note;
-		byte scale;
-
-		// format: d=N,o=N,b=NNN:
-		// find the start (skip name, etc)
-
-		while (read_byte(p, pgm) != ':')
-			p++; // ignore name
-		p++; // skip ':'
-
-		// get default duration
-		if (read_byte(p, pgm) == 'd')
-		{
-			p++;
-			p++; // skip "d="
-			num = 0;
-			while (isdigit(read_byte(p, pgm)))
-			{
-				num = (num * 10) + (read_byte(p, pgm) - '0');
-				p++;
-			}
-			if (num > 0)
-				default_dur = num;
-			p++; // skip comma
-		}
-
-		// get default octave
-		if (read_byte(p, pgm) == 'o')
-		{
-			p++;
-			p++; // skip "o="
-			num = read_byte(p, pgm) - '0';
-			p++;
-			if (num >= 3 && num <= 7)
-				default_oct = num;
-			p++; // skip comma
-		}
-
-		// get BPM
-		if (read_byte(p, pgm) == 'b')
-		{
-			p++;
-			p++; // skip "b="
-			num = 0;
-			while (isdigit(read_byte(p, pgm)))
-			{
-				num = (num * 10) + (read_byte(p, pgm) - '0');
-				p++;
-			}
-			bpm = num;
-			p++; // skip colon
-		}
-
-		// BPM usually expresses the number of quarter notes per minute
-		wholenote = (60 * 1000L / bpm) * 4; // this is the time for whole note (in milliseconds)
-
-		// now begin note loop
-		while (read_byte(p, pgm))
-		{
+			//Serial.println("SONG CONTINUING");
+			
 			// first, get note duration, if available
 			num = 0;
-			while (isdigit(read_byte(p, pgm)))
+			while (isdigit(peek_byte()))
 			{
-				num = (num * 10) + (read_byte(p, pgm) - '0');
-				p++;
+				num = (num * 10) + (pop_byte() - '0');
 			}
+
+			//Serial.println("END DURATION");
 
 			if (num)
 				duration = wholenote / num;
@@ -454,7 +276,7 @@ public:
 			// now get the note
 			note = 0;
 
-			switch (read_byte(p, pgm))
+			switch (pop_byte())
 			{
 			case 'c':
 				note = 1;
@@ -481,27 +303,31 @@ public:
 			default:
 				note = 0;
 			}
-			p++;
+
+			//Serial.println("END NOTE");
 
 			// now, get optional '#' sharp
-			if (read_byte(p, pgm) == '#')
+			if (peek_byte() == '#')
 			{
+				pop_byte();
 				note++;
-				p++;
 			}
+
+			//Serial.println("END #");
 
 			// now, get optional '.' dotted note
-			if (read_byte(p, pgm) == '.')
+			if (peek_byte() == '.')
 			{
+				pop_byte();
 				duration += duration / 2;
-				p++;
 			}
 
+			//Serial.println("END .");
+
 			// now, get scale
-			if (isdigit(read_byte(p, pgm)))
+			if (isdigit(peek_byte()))
 			{
-				scale = read_byte(p, pgm) - '0';
-				p++;
+				scale = pop_byte() - '0';
 			}
 			else
 			{
@@ -510,24 +336,108 @@ public:
 
 			scale += octave_offset;
 
-			if (read_byte(p, pgm) == ',')
-				p++; // skip comma for next note (or we may be at the end)
-				
-				
+			//Serial.println("END SCALE");
+
+			if (peek_byte() == ',')
+				pop_byte(); // skip comma for next note (or we may be at the end)
+
 			// now play the note
 
 			if (note)
 			{
-				_tone(read_word(&notes[(scale - 4) * 12 + note], pgm));
-				delay(duration);
-				_noTone();
+				uint16_t note_word = pgm_read_word(&notes[(scale - 4) * 12 + note]);
+				_tone(note_word);
+				//Serial.print("Playing note: ");
+				//Serial.println(note_word);
 			}
 			else
 			{
-				delay(duration);
+				//Serial.println("Playing rest");
+				_noTone();
 			}
+
+			return true;
+
 		}
-	}
-	
+						
+		char peek_byte(){
+			return get_byte(songPosition);
+			/*
+			char read = get_byte(songPosition);
+			Serial.print("Peeked: '");
+			Serial.write(read);
+			Serial.println("'");
+			return read;
+			*/
+		}
+		
+		char pop_byte(){
+			get_byte(songPosition++);
+			/*
+			char read = get_byte(songPosition++);
+			//Serial.print("Popped: '");
+			//Serial.write(read);
+			//Serial.println("'");
+			return read;
+			*/
+		}
+				
+		virtual char get_byte(int pos){ return 0; };
+		
 };
 
+class ConstSong: public Song{
+	
+	protected:
+		const char* songStart; //the string containing the song (in RTTTL format)
+
+	public:
+
+		ConstSong(uint8_t tonePin)
+			:Song(tonePin) //call superclass constructor
+		{
+			//do nothing
+		}
+		
+		void setSong(const char* song){
+			this->songStart = song;
+			Song::initSong();
+		}
+
+};
+
+
+class ProgmemSong: public ConstSong{
+
+	public:
+		ProgmemSong(uint8_t tonePin)
+			:ConstSong(tonePin)
+		{
+			//do nothing
+		}
+
+	private:
+		char get_byte(int pos)
+		{
+			return pgm_read_byte(songStart + pos);
+		}
+
+};
+
+class RamSong: public ConstSong{
+
+	public:
+		RamSong(uint8_t tonePin)
+			:ConstSong(tonePin)
+		{
+			//do nothing
+		}
+		
+
+	private:
+		char get_byte(int pos)
+		{
+			return *(songStart + pos);
+		}
+
+};
