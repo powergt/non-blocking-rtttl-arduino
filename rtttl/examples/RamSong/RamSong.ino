@@ -6,7 +6,7 @@ const char song[] = "AxelF:d=4,o=5,b=125:32p,8g,8p,16a#.,8p,16g,16p,16g,8c6,8g,8
 unsigned long printedTime = -1;
 unsigned long printedPeriod = 500;
 
-RamSong player(13);
+RamPlayer player(13);
 
 void setup(void)
 {
@@ -17,21 +17,28 @@ void setup(void)
 void loop(void)
 {
   
-  //play the tune
-  while(player.tick()){
-    tryPrint("First Play");
+  Serial.println("First Play");
+
+  //play the song for the first time
+  player.finishSong();
+
+  Serial.println("Song rewound automatically");  
+
+  //play the tune again, this time blocking per note
+  while(player.stepSong()){
+    Serial.println("Second Play");
   }
 
-  Serial.println("Song auto-rewound");
+  Serial.println("Song rewound automatically");
 
-  //play the tune again
-  while(player.tick()){
-    tryPrint("Second Play");
+  //play the tune with no blocking
+  while(player.pollSong()){
+    tryPrint("Third Play");
   }
 
   Serial.println("Play has ended");    
   while(true){
-    //do nothing
+    //keep the thread in this loop - circuit now silent
   }
   
 }

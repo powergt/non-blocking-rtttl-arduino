@@ -9,7 +9,7 @@ const char song_P[] PROGMEM = "PacMan:b=160:32b,32p,32b6,32p,32f#6,32p,32d#6,32p
 unsigned long printedTime = -1;
 unsigned long printedPeriod = 500;
 
-ProgmemSong player(13);
+ProgmemPlayer player(13);
 
 void setup(void)
 {
@@ -20,21 +20,28 @@ void setup(void)
 void loop(void)
 {
   
-  //play the tune
-  while(player.tick()){
-    tryPrint("First Play");
+  Serial.println("First Play");
+
+  //play the song for the first time
+  player.finishSong();
+
+  Serial.println("Song rewound automatically");  
+
+  //play the tune again, this time blocking per note
+  while(player.stepSong()){
+    Serial.println("Second Play");
   }
 
   Serial.println("Song rewound automatically");
 
-  //play the tune again
-  while(player.tick()){
-    tryPrint("Second Play");
+  //play the tune with no blocking
+  while(player.pollSong()){
+    tryPrint("Third Play");
   }
 
   Serial.println("Play has ended");    
   while(true){
-    //do nothing
+    //keep the thread in this loop - circuit now silent
   }
   
 }
