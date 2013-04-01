@@ -91,7 +91,7 @@ const prog_uint16_t notes[] PROGMEM =
 	0
 };
 
-class Song {
+class Player {
 
 	protected:
 
@@ -101,6 +101,8 @@ class Song {
 
 		unsigned long periodStart; //when the last note or rest was started
 		unsigned long periodLength; //the length of the last note or rest
+		
+		bool silent; //indicates whether the tone is currently playing or not
 
 		int bpm; //the beats per minute (speed) of the song
 		unsigned long wholenote; //duration of a whole note in milliseconds 
@@ -115,12 +117,13 @@ class Song {
 	
     public:
     
-		Song(uint8_t tonePin){
+		Player(uint8_t tonePin){
 			this->tonePin = tonePin;
 			this->nextPos = 0;
 			this->defaultNoteDenominator = 4;
 			this->defaultOctave = 6;
 			this->bpm = 63;
+			this->silent = true;
 		}
 						
 		bool initSong()
@@ -130,6 +133,7 @@ class Song {
 
 			//Serial.println("initSong() started");			
 
+		//TODO CH, figure out if this can be called multiple times? THink not, could explain some bugs
 	#ifdef _Tone_h
 			this->m_tone.begin(tonePin);
 	#endif
@@ -202,19 +206,93 @@ class Song {
 
 		}
 		
-		bool tick()
+		bool transitionDue(){
+				return periodStart == -1 || (millis() - periodStart) > periodLength;
+		}
+		
+		/** If a change in tone, or a rest is due, then this
+		 * function will complete the change, and then return immediately
+		 * with any tone begun as part of the rtttl melody continuing
+		 * to play. This should be executed very regularly, without
+		 * any long delays between calls to maintain the impression 
+		 * of a continuous melody. */
+		bool pollSong()
 		{
 			//see if a new transition needs to be processed
-			if(periodStart == -1 || (millis() - periodStart) > periodLength){
-				//remember when it started
-				periodStart = millis();
+			if(transitionDue()){
 				//process next transition, and check if it is the last
 				if(!nextTransition()){
 					initSong();
-					return false;
+					return false; //no more steps in the melody
 				}
 			}
+			return true; //note was played
+		}
+		
+		//TODO CH change references to 'transition' to read 'step'
+
+		/** Triggers the next individual step (note or rest) and blocks 
+		 * until the next is due. Notes keep playing, and rests 
+		 * stay silent even after this has returned. */
+		bool stepSong(){
+			if(!nextTransition()){
+				initSong();
+				return false; //no more steps in the melody
+			}
+			else{ //a transition just started
+				awaitTransitionDue();
+				return true; //step time has finished
+			}
+		}
+		
+		void awaitTransitionDue(){
+			while(!transitionDue()){ //block while the transition is finished
+				delay(1);
+			}
+		}
+
+		/** Plays the whole tune, blocking until it is finished. */
+		void finishSong(){
+			while(this->stepSong()){
+				//do nothing
+			}
+		}
+		
+		/** Start a beep which will finish when pollBeep()
+		 * returns false. N.B. you must keep polling from time
+		 * to time. */
+		void beep(uint16_t freq, unsigned long length){
+			periodStart = millis();
+			periodLength = length;
+			_tone(freq);
+		}
+
+		/** Start a beep which will only finish when you call silence() */
+		void beep(uint16_t freq){ 
+			periodStart = millis();
+			periodLength = -1;
+			_tone(freq);
+		}
+		
+		/** Returns true as long as the beep is still playing, 
+		 * false otherwise. N.B. this will always return true 
+		 * after calling beep(...) without a duration argument. */
+		bool pollBeep(){
+			if(transitionDue()){
+				silence();
+				return false;
+			}
 			return true;
+		}
+
+		void silence(){
+			periodStart = -1;
+			periodLength = -1;
+			_noTone();
+		}
+		
+		bool isSilent(){
+			return silent;
 		}
 		
 	private:
@@ -223,21 +301,25 @@ class Song {
 		void _tone(uint16_t freq)
 		{
 			this->m_tone.play(freq);
+			silent = false;
 		}
 
 		void _noTone()
 		{
 			this->m_tone.stop();
+			silent = true;
 		}
 #else
 		void _tone(uint16_t freq)
 		{
 			tone(this->tonePin, freq);
+			silent = false;
 		}
 
 		void _noTone()
 		{
 			noTone(this->tonePin);
+			silent = true;
 		}
 #endif
 		
@@ -245,6 +327,8 @@ class Song {
 		{
 			
 			//Serial.println("nextTransition() started");
+			//remember when it started
+			periodStart = millis();
 
 			byte note;
 			byte scale;
@@ -384,32 +468,32 @@ class Song {
 		
 };
 
-class ConstSong: public Song{
+class ConstPlayer: public Player{
 	
 	protected:
 		const char* songStart; //the string containing the song (in RTTTL format)
 
 	public:
 
-		ConstSong(uint8_t tonePin)
-			:Song(tonePin) //call superclass constructor
+		ConstPlayer(uint8_t tonePin)
+			:Player(tonePin) //call superclass constructor
 		{
 			//do nothing
 		}
 		
 		void setSong(const char* song){
 			this->songStart = song;
-			Song::initSong();
+			Player::initSong();
 		}
 
 };
 
 
-class ProgmemSong: public ConstSong{
+class ProgmemPlayer: public ConstPlayer{
 
 	public:
-		ProgmemSong(uint8_t tonePin)
-			:ConstSong(tonePin)
+		ProgmemPlayer(uint8_t tonePin)
+			:ConstPlayer(tonePin)
 		{
 			//do nothing
 		}
@@ -422,11 +506,11 @@ class ProgmemSong: public ConstSong{
 
 };
 
-class RamSong: public ConstSong{
+class RamPlayer: public ConstPlayer{
 
 	public:
-		RamSong(uint8_t tonePin)
-			:ConstSong(tonePin)
+		RamPlayer(uint8_t tonePin)
+			:ConstPlayer(tonePin)
 		{
 			//do nothing
 		}
