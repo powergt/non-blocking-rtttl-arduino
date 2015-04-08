@@ -22,7 +22,14 @@
   #define NULL 0
 #endif
 
-const prog_uint16_t notes[] PROGMEM =
+//TODO CH incorporate alternative return values - not boolean but various integers 
+//as below - allowing true/false logic to remain unchanged
+#define SONG_FINISHED 0
+#define STEP_UNCHANGED 1
+#define STEP_NOTE 2
+#define STEP_REST 3
+
+const uint16_t notes[] PROGMEM =
 {	0, //
 	NOTE_C4, //
 	NOTE_CS4, //
@@ -126,6 +133,10 @@ class Player {
 			this->silent = true;
 		}
 						
+		void transpose(int octaves){
+			this->transposeOctaves = octaves;
+		}				
+		
 		bool initSong()
 		{
 			
@@ -206,7 +217,7 @@ class Player {
 
 		}
 		
-		bool transitionDue(){
+		bool stepDue(){
 				return periodStart == -1 || (millis() - periodStart) > periodLength;
 		}
 		
@@ -218,10 +229,10 @@ class Player {
 		 * of a continuous melody. */
 		bool pollSong()
 		{
-			//see if a new transition needs to be processed
-			if(transitionDue()){
-				//process next transition, and check if it is the last
-				if(!nextTransition()){
+			//see if a new Step needs to be processed
+			if(stepDue()){
+				//process next Step, and check if it is the last
+				if(!nextStep()){
 					initSong();
 					return false; //no more steps in the melody
 				}
@@ -229,24 +240,22 @@ class Player {
 			return true; //note was played
 		}
 		
-		//TODO CH change references to 'transition' to read 'step'
-
 		/** Triggers the next individual step (note or rest) and blocks 
 		 * until the next is due. Notes keep playing, and rests 
 		 * stay silent even after this has returned. */
 		bool stepSong(){
-			if(!nextTransition()){
+			if(!nextStep()){
 				initSong();
 				return false; //no more steps in the melody
 			}
-			else{ //a transition just started
-				awaitTransitionDue();
+			else{ //a Step just started
+				awaitStepDue();
 				return true; //step time has finished
 			}
 		}
 		
-		void awaitTransitionDue(){
-			while(!transitionDue()){ //block while the transition is finished
+		void awaitStepDue(){
+			while(!stepDue()){ //block while the Step is finished
 				delay(1);
 			}
 		}
@@ -278,7 +287,7 @@ class Player {
 		 * false otherwise. N.B. this will always return true 
 		 * after calling beep(...) without a duration argument. */
 		bool pollBeep(){
-			if(transitionDue()){
+			if(stepDue()){
 				silence();
 				return false;
 			}
@@ -297,36 +306,52 @@ class Player {
 		
 	private:
 
-#ifdef _Tone_h
-		void _tone(uint16_t freq)
-		{
-			this->m_tone.play(freq);
-			silent = false;
-		}
 
-		void _noTone()
-		{
-			this->m_tone.stop();
-			silent = true;
-		}
+#ifdef NewTone_h
+	void _tone(uint16_t freq)
+	{
+		NewTone(this->tonePin, freq);
+		silent = false;
+	}
+
+	void _noTone()
+	{
+		noNewTone(this->tonePin);
+		silent = true;
+	}
 #else
-		void _tone(uint16_t freq)
-		{
-			tone(this->tonePin, freq);
-			silent = false;
-		}
+	#ifdef _Tone_h
+			void _tone(uint16_t freq)
+			{
+				this->m_tone.play(freq);
+				silent = false;
+			}
 
-		void _noTone()
-		{
-			noTone(this->tonePin);
-			silent = true;
-		}
+			void _noTone()
+			{
+				this->m_tone.stop();
+				silent = true;
+			}
+	#else
+			void _tone(uint16_t freq)
+			{
+				tone(this->tonePin, freq);
+				silent = false;
+			}
+
+			void _noTone()
+			{
+				noTone(this->tonePin);
+				silent = true;
+			}
+	#endif
 #endif
+
 		
-		bool nextTransition()
+		bool nextStep()
 		{
 			
-			//Serial.println("nextTransition() started");
+			//Serial.println("nextStep() started");
 			//remember when it started
 			periodStart = millis();
 
@@ -361,27 +386,35 @@ class Player {
 			switch (pop_byte())
 			{
 			case 'c':
+			case 'C':
 				note = 1;
 				break;
 			case 'd':
+			case 'D':
 				note = 3;
 				break;
 			case 'e':
+			case 'E':
 				note = 5;
 				break;
 			case 'f':
+			case 'F':
 				note = 6;
 				break;
 			case 'g':
+			case 'G':
 				note = 8;
 				break;
 			case 'a':
+			case 'A':
 				note = 10;
 				break;
 			case 'b':
+			case 'B':
 				note = 12;
 				break;
 			case 'p':
+			case 'P':
 			default:
 				note = 0;
 			}
