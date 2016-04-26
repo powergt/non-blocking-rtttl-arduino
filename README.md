@@ -1,6 +1,6 @@
 # Non-blocking playback of RTTTL melodies
 
-RTTTL is Nokia's **Ringtone Text Transfer Language**, from when mobile phones could only play a single, squeaky note at a time. People could text each other ringtones like this example...
+RTTTL is Nokia's ***R***ing***t***one ***T***ext ***T***ransfer ***L***anguage, from when mobile phones could only play a single, squeaky note at a time. People could text each other ringtones like this example...
 
 ```BringMeSunshine:d=8,o=5,b=140:c.6,b.,4a.,2e.,c.6,b.,2a,p,c.6,b.,4a,16p,2f.,16p,c.6,b.,2a,p, e.6,d#.6,4d.6,c6,b.,4a#.,16p,g.,g#.,a.,f.,a,e.6,4d.6,16p,c.6,b.,4a.,d.6,c.6,4b.,e.6,e.6,2c.6```
 
