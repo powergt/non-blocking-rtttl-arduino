@@ -10,7 +10,7 @@ This Arduino library provides non-blocking playback of RTTTL melodies using a Pi
 
 It has been tested on [Shrimp](http://start.shrimping.it/project/shrimp/), and Arduino Uno. Wire it like the Piezo part of our [Alarm Clock build](http://start.shrimping.it/project/alarmclock/build.html#step12) (Shrimp) or [this 'Tone' example](https://www.arduino.cc/en/Tutorial/ToneMelody) (Arduino). [Example sketches](https://github.com/cefn/non-blocking-rtttl-arduino/tree/master/rtttl/examples) showing RTTTL playback are provided. 
 
-If you have followed our [@ShrimpingIt configuration steps](http://start.shrimping.it/project/shrimp/program.html) then the RTTTL library is already installed. Follow [these instructions](https://www.arduino.cc/en/Guide/Libraries) to use the library on its own. 
+If you have followed our [@ShrimpingIt configuration steps](http://start.shrimping.it/project/shrimp/program.html) then the RTTTL library is already installed. Otherwise, follow [these instructions](https://www.arduino.cc/en/Guide/Libraries) to use the library on its own. 
 
 Although based on [ponty's arduino-rttl-player](https://github.com/ponty/arduino-rtttl-player) changing it to non-blocking playback leaves very little left (@ponty's was a blocking library). Thanks to @ponty for all the RTTTL decoding logic, and the stimulus to create this library.
 
