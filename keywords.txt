@@ -1,0 +1,29 @@
+###################################
+# Syntax Coloring Map For non_blocking_rtttl
+###################################
+
+###################################
+# Datatypes (KEYWORD1)
+###################################
+
+ProgmemPlayer	KEYWORD1
+RamPlayer	KEYWORD1
+
+###################################
+# Methods and Functions (KEYWORD2)
+###################################
+
+transpose	KEYWORD2
+initSong	KEYWORD2
+pollSong	KEYWORD2
+finishSong	KEYWORD2
+beep	KEYWORD2
+pollBeep	KEYWORD2
+silence	KEYWORD2
+isSilent	KEYWORD2
+setSong	KEYWORD2
+setContinuousPlay	KEYWORD2
+
+###################################
+# Constants (LITERAL1)
+###################################
